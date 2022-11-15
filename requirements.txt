@@ -1,0 +1,10 @@
+matplotlib
+torch
+sklearn
+numpy
+tqdm
+pandas
+nltk
+rouge
+contractions
+wandb
