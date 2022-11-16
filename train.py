@@ -310,10 +310,10 @@ def train(args, model, loaders, optimizer, criterion, device):
             print(f"\nval loss : {val_loss} | val total LCS acc: {val_acc}")
             print(f"val LCS action acc : {val_action_acc} | val LCS target acc: {val_target_acc}")
             
-            wandb.log({"val loss": train_loss})
-            wandb.log({"val total LCS acc": train_acc})
-            wandb.log({"val LCS action acc": train_action_acc})
-            wandb.log({"val LCS target acc": train_target_acc})
+            wandb.log({"val loss": val_loss})
+            wandb.log({"val total LCS acc": val_acc})
+            wandb.log({"val LCS action acc": val_action_acc})
+            wandb.log({"val LCS target acc": val_target_acc})
 
     # ================== TODO: CODE HERE ================== #
     # Task: Implement some code to keep track of the model training and

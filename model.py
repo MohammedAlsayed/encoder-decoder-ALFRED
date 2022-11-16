@@ -59,7 +59,7 @@ class Decoder(nn.Module):
 
         return (action, target), hidden
 
-class DecoderAttention(nn.Module):
+class AttentionDecoder(nn.Module):
     """
     Conditional recurrent decoder. Iteratively generates the next
     token given the context vector from the encoder and ground truth
@@ -68,7 +68,7 @@ class DecoderAttention(nn.Module):
     """
 
     def __init__(self, params):
-        super(Decoder, self).__init__()
+        super(AttentionDecoder, self).__init__()
         self.params = params
         self.embedding_action = nn.Embedding(params.n_actions, params.embedding_dim, padding_idx=0)
         self.embedding_target = nn.Embedding(params.n_targets, params.embedding_dim, padding_idx=0)
