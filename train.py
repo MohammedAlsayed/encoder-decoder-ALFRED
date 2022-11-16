@@ -59,7 +59,7 @@ def setup_dataloader(args):
 
     # args.train_input_length = train_input_length
 
-    train_dataset = TensorDataset(torch.from_numpy(x_train[0:5000]), torch.from_numpy(y_train[0:5000]), torch.from_numpy(l_train[0:5000]), torch.from_numpy(train_output_lengths[0:5000]))
+    train_dataset = TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train), torch.from_numpy(l_train), torch.from_numpy(train_output_lengths))
     val_dataset = TensorDataset(torch.from_numpy(x_valid), torch.from_numpy(y_valid), torch.from_numpy(l_valid), torch.from_numpy(valid_output_lengths))
     
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
@@ -190,8 +190,6 @@ def train_epoch(
             action_output[:, di:di+1] = torch.argmax(F.log_softmax(decoder_output[0].view(batch_size, -1), dim=1), dim=1).view(batch_size,1)
             target_output[:, di:di+1] = torch.argmax(F.log_softmax(decoder_output[1].view(batch_size, -1), dim=1), dim=1).view(batch_size,1)
 
-            # print(torch.argmax(F.log_softmax(decoder_output[0].view(batch_size, -1), dim=1), dim=1).view(batch_size,1))
-
             # Teacher forcing
             decoder_action_input = action_label
             decoder_target_input = target_label
@@ -274,10 +272,10 @@ def train(args, model, loaders, optimizer, criterion, device):
         )
 
         # some logging
-        # wandb.log({"train loss": train_loss})
-        # wandb.log({"train acc": train_acc})
-        # wandb.log({"train action acc": train_action_acc})
-        # wandb.log({"train target acc": train_target_acc})
+        wandb.log({"train loss": train_loss})
+        wandb.log({"train acc": train_acc})
+        wandb.log({"train action acc": train_action_acc})
+        wandb.log({"train target acc": train_target_acc})
         
         print(f"\ntrain loss : {train_loss}")
         print(f"train acc : {train_acc}")
@@ -300,10 +298,10 @@ def train(args, model, loaders, optimizer, criterion, device):
             print(f"\nval loss : {val_loss} | val acc: {val_acc}")
             print(f"val action acc : {val_action_acc} | val target acc: {val_target_acc}")
             
-            # wandb.log({"val loss": train_loss})
-            # wandb.log({"val acc": train_acc})
-            # wandb.log({"val action acc": train_action_acc})
-            # wandb.log({"val target acc": train_target_acc})
+            wandb.log({"val loss": train_loss})
+            wandb.log({"val acc": train_acc})
+            wandb.log({"val action acc": train_action_acc})
+            wandb.log({"val target acc": train_target_acc})
 
     # ================== TODO: CODE HERE ================== #
     # Task: Implement some code to keep track of the model training and
@@ -314,7 +312,7 @@ def train(args, model, loaders, optimizer, criterion, device):
 
 def main(args):
 
-    # wandb.init(project="hw3", entity="alsayedm")
+    wandb.init(project="hw3", entity="alsayedm")
     device = get_device(args.force_cpu)
 
     # get dataloaders

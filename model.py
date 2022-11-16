@@ -53,11 +53,7 @@ class Decoder(nn.Module):
         action_output = self.embedding_action(action_input)
         target_output = self.embedding_target(target_input)
         output = action_output + target_output
-
-        
         output, hidden = self.lstm(output, hidden)
-        
-
         action = self.fc_action(output)
         target = self.fc_target(output)
 
