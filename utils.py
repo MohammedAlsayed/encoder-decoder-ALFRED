@@ -93,6 +93,7 @@ def encode_data(data, v2i, a2id, t2id, input_size, output_size):
     output_lengths = []
     rows = len(data)
     for episode in data:
+        idx = 0 # to limit the number of actions (DEBUG purposes)
         i = []
         a = []
         t = []
@@ -101,11 +102,14 @@ def encode_data(data, v2i, a2id, t2id, input_size, output_size):
         t.append(a2id['<start>'])
 
         for inst, label in episode:
+            # if idx >= output_size-2:
+            #     break
             for word in inst.split():
                 i.append(v2i[word] if word in v2i else v2i["<unk>"])
 
             a.append(a2id[label[0]])
             t.append(t2id[label[1]])
+            idx += 1
         
         i.append(v2i['<end>'])
         a.append(v2i['<end>'])
@@ -159,6 +163,7 @@ def prefix_match(predicted_labels, gt_labels):
 
     return pm
 
+# predicted outputs, true_lables, number of outputs (to skip padding)
 def LCS(predicted, labels, o_length):
     rouge = Rouge()
     total_score = 0

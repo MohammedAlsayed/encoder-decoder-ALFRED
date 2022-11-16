@@ -155,7 +155,7 @@ def train_epoch(
     epoch_target_acc = 0.0
 
     # iterate over each batch in the dataloader
-    # NOTE: you may have additional outputs from the loader __getitem__, you can modify this
+    # length is the original length of the
     for (inputs, labels, length, o_length) in tqdm.tqdm(loader):
         # put model inputs to device
         inputs, labels = inputs.to(device), labels.to(device)
@@ -176,31 +176,41 @@ def train_epoch(
         target_output = np.zeros((batch_size, args.output_size), dtype=np.int32) # decoded sequence of targets
 
         loss = 0
+        # decode action, target one by one accross batch
         for di in range(args.output_size):
+
             decoder_output, decoder_hidden = decoder(decoder_action_input, decoder_target_input, decoder_hidden)            
+            
             action_label = labels[:, 0:1, di:di+1].view(batch_size, -1) # slice action labels across batch = BATCH_SIZE x 1
             target_label = labels[:, 1:2, di:di+1].view(batch_size, -1) # slice target labels across batch = BATCH_SIZE x 1 
+            
+            # transforming label to one hot encoding for criterion
             action_label_encoded = F.one_hot(action_label.to(torch.int64), num_classes=args.n_actions)
             target_label_encoded = F.one_hot(target_label.to(torch.int64), num_classes=args.n_targets)
-
+           
+            # summing action and target loss of one decode step
             loss += criterion(decoder_output[0].view(batch_size, -1), action_label_encoded.view(batch_size, -1).float()) 
-            + criterion(decoder_output[1].view(batch_size, -1), target_label_encoded.view(batch_size, -1).float())
+            loss += criterion(decoder_output[1].view(batch_size, -1), target_label_encoded.view(batch_size, -1).float())
             
-            # saving the decoding output for LCS score computation
+            
+            # saving the decode output for LCS score computation
             action_output[:, di:di+1] = torch.argmax(F.log_softmax(decoder_output[0].view(batch_size, -1), dim=1), dim=1).view(batch_size,1)
             target_output[:, di:di+1] = torch.argmax(F.log_softmax(decoder_output[1].view(batch_size, -1), dim=1), dim=1).view(batch_size,1)
 
             # Teacher forcing
+            # change the next input of the decoder to the ground truth
             decoder_action_input = action_label
             decoder_target_input = target_label
         
         # step optimizer and compute gradients during training
         if training:
-            optimizer['encoder_optimizer'].zero_grad()
-            optimizer['decoder_optimizer'].zero_grad()
             loss.backward()
+            
             optimizer['encoder_optimizer'].step()
             optimizer['decoder_optimizer'].step()
+
+            optimizer['encoder_optimizer'].zero_grad()
+            optimizer['decoder_optimizer'].zero_grad()
 
         """
         # TODO: implement code to compute some other metrics between your predicted sequence
@@ -212,17 +222,19 @@ def train_epoch(
         # em = output == labels
         # prefix_em = prefix_em(output, labels)
 
-        # find score across the batch 
+        # find LCS score across the batch 
         action_acc = LCS(action_output, labels[:, 0:1, :], o_length)
+        # print("action acc: ", action_acc)
         target_acc = LCS(target_output, labels[:, 1:2, :], o_length)
+        # print("target acc: ", target_acc)
         total_acc = (action_acc + target_acc) / 2
+        
         # logging
         epoch_acc += total_acc
         epoch_action_acc += action_acc
         epoch_target_acc += target_acc
         epoch_loss += loss.item()
-        
-
+    
     epoch_loss /= len(loader)
     epoch_acc /= len(loader)
     epoch_action_acc /= len(loader)
@@ -273,14 +285,14 @@ def train(args, model, loaders, optimizer, criterion, device):
 
         # some logging
         wandb.log({"train loss": train_loss})
-        wandb.log({"train acc": train_acc})
-        wandb.log({"train action acc": train_action_acc})
-        wandb.log({"train target acc": train_target_acc})
+        wandb.log({"train total LCS acc": train_acc})
+        wandb.log({"train LCS action acc": train_action_acc})
+        wandb.log({"train LCS target acc": train_target_acc})
         
         print(f"\ntrain loss : {train_loss}")
-        print(f"train acc : {train_acc}")
-        print(f"train action acc : {train_action_acc}")
-        print(f"train target acc : {train_target_acc}")
+        print(f"train total LCS acc : {train_acc}")
+        print(f"train LCS action acc : {train_action_acc}")
+        print(f"train LCS target acc : {train_target_acc}")
 
         # run validation every so often
         # during eval, we run a forward pass through the model and compute
@@ -295,13 +307,13 @@ def train(args, model, loaders, optimizer, criterion, device):
                 device,
             )
 
-            print(f"\nval loss : {val_loss} | val acc: {val_acc}")
-            print(f"val action acc : {val_action_acc} | val target acc: {val_target_acc}")
+            print(f"\nval loss : {val_loss} | val total LCS acc: {val_acc}")
+            print(f"val LCS action acc : {val_action_acc} | val LCS target acc: {val_target_acc}")
             
             wandb.log({"val loss": train_loss})
-            wandb.log({"val acc": train_acc})
-            wandb.log({"val action acc": train_action_acc})
-            wandb.log({"val target acc": train_target_acc})
+            wandb.log({"val total LCS acc": train_acc})
+            wandb.log({"val LCS action acc": train_action_acc})
+            wandb.log({"val LCS target acc": train_target_acc})
 
     # ================== TODO: CODE HERE ================== #
     # Task: Implement some code to keep track of the model training and
@@ -350,7 +362,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--force_cpu", action="store_true", help="debug mode")
     parser.add_argument("--eval", action="store_true", help="run eval")
-    parser.add_argument("--num_epochs", default=10, help="number of training epochs")
+    parser.add_argument("--num_epochs", default=20, help="number of training epochs")
     parser.add_argument(
         "--val_every", default=5, help="number of epochs between every eval loop"
     )
