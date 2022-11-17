@@ -4,6 +4,7 @@ import argparse
 from sklearn.metrics import accuracy_score
 from model import Encoder
 from model import Decoder
+from model import AttentionDecoder
 import numpy as np
 from torch.utils.data import TensorDataset, DataLoader
 import torch.nn.functional as F
@@ -59,7 +60,7 @@ def setup_dataloader(args):
 
     # args.train_input_length = train_input_length
 
-    train_dataset = TensorDataset(torch.from_numpy(x_train), torch.from_numpy(y_train), torch.from_numpy(l_train), torch.from_numpy(train_output_lengths))
+    train_dataset = TensorDataset(torch.from_numpy(x_train[0:2000]), torch.from_numpy(y_train[0:2000]), torch.from_numpy(l_train[0:2000]), torch.from_numpy(train_output_lengths[0:2000]))
     val_dataset = TensorDataset(torch.from_numpy(x_valid), torch.from_numpy(y_valid), torch.from_numpy(l_valid), torch.from_numpy(valid_output_lengths))
     
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
@@ -93,9 +94,11 @@ def setup_model(args, device):
 
     encoder = Encoder(args, device)
     decoder = Decoder(args)
+    attentionDecoder = AttentionDecoder(args)
     model = {}
     model['encoder'] = encoder
     model['decoder'] = decoder
+    model['attentionDecoder'] = attentionDecoder
     return model
 
 
@@ -113,7 +116,12 @@ def setup_optimizer(args, model):
     criterion = torch.nn.CrossEntropyLoss()
 
     encoder_optimizer = torch.optim.Adam(model['encoder'].parameters(), lr=args.learning_rate)
-    decoder_optimizer = torch.optim.Adam(model['decoder'].parameters(), lr=args.learning_rate)
+
+    if args.attention:
+        decoder_optimizer = torch.optim.Adam(model['attentionDecoder'].parameters(), lr=args.learning_rate)
+    else:    
+        decoder_optimizer = torch.optim.Adam(model['decoder'].parameters(), lr=args.learning_rate)
+    
 
     optimizer = {}
     optimizer['encoder_optimizer'] = encoder_optimizer
@@ -149,6 +157,7 @@ def train_epoch(
     
     encoder = model['encoder']
     decoder = model['decoder']
+    attentionDecoder = model['attentionDecoder']
     epoch_loss = 0.0
     epoch_acc = 0.0
     epoch_action_acc = 0.0
@@ -162,9 +171,7 @@ def train_epoch(
         
         batch_size = inputs.shape[0]
         encoder_hidden = encoder.initHidden(batch_size)
-        # for ei in range(len(inputs)):
         encoder_output, encoder_hidden = encoder(inputs, encoder_hidden, length)
-            # encoder_outputs[ei] = encoder_output[0, 0] # use for attention later.
         
         decoder_action_input = torch.tensor([[BOS_token]]*batch_size, device=device)
         decoder_target_input = torch.tensor([[BOS_token]]*batch_size, device=device)
@@ -179,7 +186,10 @@ def train_epoch(
         # decode action, target one by one accross batch
         for di in range(args.output_size):
 
-            decoder_output, decoder_hidden = decoder(decoder_action_input, decoder_target_input, decoder_hidden)            
+            if args.attention:
+                decoder_output, decoder_hidden = attentionDecoder(decoder_action_input, decoder_target_input, decoder_hidden, encoder_output, length)
+            else:
+                decoder_output, decoder_hidden = decoder(decoder_action_input, decoder_target_input, decoder_hidden)            
             
             action_label = labels[:, 0:1, di:di+1].view(batch_size, -1) # slice action labels across batch = BATCH_SIZE x 1
             target_label = labels[:, 1:2, di:di+1].view(batch_size, -1) # slice target labels across batch = BATCH_SIZE x 1 
@@ -224,9 +234,7 @@ def train_epoch(
 
         # find LCS score across the batch 
         action_acc = LCS(action_output, labels[:, 0:1, :], o_length)
-        # print("action acc: ", action_acc)
         target_acc = LCS(target_output, labels[:, 1:2, :], o_length)
-        # print("target acc: ", target_acc)
         total_acc = (action_acc + target_acc) / 2
         
         # logging
@@ -246,7 +254,10 @@ def train_epoch(
 def validate(args, model, loader, optimizer, criterion, device):
     # set model to eval mode
     model['encoder'].eval()
-    model['decoder'].eval()
+    if args.attention:
+        model['attentionDecoder'].eval()
+    else:
+        model['decoder'].eval()
 
     # don't compute gradients
     with torch.no_grad():
@@ -268,7 +279,11 @@ def train(args, model, loaders, optimizer, criterion, device):
     # In each epoch we compute loss on each sample in our dataset and update the model
     # weights via backpropagation
     model['encoder'].train()
-    model['decoder'].train()
+
+    if args.attention:
+        model['attentionDecoder'].train()
+    else:
+        model['decoder'].train()
 
     for epoch in tqdm.tqdm(range(args.num_epochs)):
 
@@ -358,19 +373,19 @@ if __name__ == "__main__":
         "--model_output_dir", type=str, help="where to save model outputs"
     )
     parser.add_argument(
-        "--batch_size", type=int, default=32, help="size of each batch in loader"
+        "--batch_size", type=int, default=1, help="size of each batch in loader"
     )
     parser.add_argument("--force_cpu", action="store_true", help="debug mode")
+    parser.add_argument("--attention", action="store_true", help="attention on decoder")
     parser.add_argument("--eval", action="store_true", help="run eval")
-    parser.add_argument("--num_epochs", default=20, help="number of training epochs")
+    parser.add_argument("--num_epochs", default=30, help="number of training epochs")
     parser.add_argument(
         "--val_every", default=5, help="number of epochs between every eval loop"
     )
     parser.add_argument("--learning_rate", default=0.001, help="learning rate", type=float)
     parser.add_argument("--embedding_dim", default=128, help="number of embedding dimensions", type=int)
     parser.add_argument("--dropout", default=0.33, help="dropout rate of the neural net", type=float)
-    parser.add_argument("--hidden_size", default=64, help="LSTM hidden dimension size", type=int)
+    parser.add_argument("--hidden_size", default=256, help="LSTM hidden dimension size", type=int)
 
     args = parser.parse_args()
-
     main(args)
