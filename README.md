@@ -67,3 +67,5 @@ This repository implements a Vanila & Attention Encoder Decoder to learn ALFRED 
 ![](plots/local_attention_glove_train.png)
 ![](plots/local_attention_glove_val.png)
 ![](plots/local_attention_glove_loss.png)
+
+- I implemented the Transformer Encoder Decoder but didn't have time to compare to run it and compare it with the attention encoder decoder
