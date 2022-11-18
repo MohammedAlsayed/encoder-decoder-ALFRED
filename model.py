@@ -3,6 +3,10 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+from torch import nn, Tensor
+from torch.nn import TransformerEncoder, TransformerEncoderLayer
+import math
+from typing import Tuple
 
 class Encoder(nn.Module):
     """
@@ -15,7 +19,14 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.device = device
         self.hidden_size = params.hidden_size
-        self.embedding = nn.Embedding(params.n_words, params.embedding_dim, padding_idx=0)
+        
+        if params.glove:
+            print("using glove embeddings")
+            self.embedding = nn.Embedding.from_pretrained(torch.from_numpy(params.pre_embeddings).float(), freeze=True)
+        else:
+            print("using regular embeddings")
+            self.embedding = nn.Embedding(params.n_words, params.embedding_dim, padding_idx=0)
+
         self.lstm = nn.LSTM(params.embedding_dim, params.hidden_size, dropout=params.dropout, batch_first=True) 
 
     def forward(self, input, hidden, length):
@@ -76,6 +87,7 @@ class AttentionDecoder(nn.Module):
         self.output_size = params.output_size
         self.hidden_size = params.hidden_size
         self.dropout_p = params.dropout
+        self.local_attention = params.local_attention
 
         self.embedding_action = nn.Embedding(self.n_actions, self.hidden_size, padding_idx=0)
         self.embedding_target = nn.Embedding(self.n_targets, self.hidden_size, padding_idx=0)
@@ -89,7 +101,7 @@ class AttentionDecoder(nn.Module):
 
         
 
-    def forward(self, action_input, target_input, hidden_d, hidden_e, length):
+    def forward(self, idx, action_input, target_input, hidden_d, hidden_e):
         # concat the embedding of action and target
         action_output = self.embedding_action(action_input)
         target_output = self.embedding_target(target_input)
@@ -100,10 +112,14 @@ class AttentionDecoder(nn.Module):
         output, hidden = self.lstm(output, hidden_d)
         
         batch_size = action_output.shape[0]
-        hidden_d = hidden[0].view(batch_size,1,-1) # make batch dim at 0
+        hidden_d = hidden[0].view(batch_size,1,-1) # switch batch dim to the begning
+        
+        # local attention
+        if self.local_attention:
+            hidden_e = hidden_e[:, idx-2:idx+2, :]
 
         hidden_d = hidden_d.expand(-1, hidden_e.shape[1], -1) # expand decoder dim to the same as all encoder hidden states
-                                                              # in other words, replicate the decoding embedding across input_size 
+                                                              # in other words, replicate the decoding embedding across input_size or local attention size 
 
         x = torch.cat((hidden_e, hidden_d), dim=2) # concat last decode hidden with all encode hiddens, hidden dimesion doubles
 
@@ -121,14 +137,69 @@ class AttentionDecoder(nn.Module):
         return (action, target), hidden
 
 
-class EncoderDecoder(nn.Module):
-    """
-    Wrapper class over the Encoder and Decoder.
-    TODO: edit the forward pass arguments to suit your needs
-    """
 
-    def __init__(self):
-        pass
 
-    def forward(self, x):
-        pass
+class TransformerModel(nn.Module):
+
+    def __init__(self, params, d_model: int, nhead: int, d_hid: int,
+                 nlayers: int, dropout: float = 0.5):
+        super().__init__()
+        self.model_type = 'Transformer'
+        self.pos_encoder = PositionalEncoding(d_model, dropout)
+        encoder_layers = TransformerEncoderLayer(d_model, nhead, d_hid, dropout)
+        self.transformer_encoder = TransformerEncoder(encoder_layers, nlayers)
+        self.encoder = nn.Embedding(params.n_words, d_model)
+        self.d_model = d_model
+        self.action_decoder = nn.Linear(d_model, params.n_actions)
+        self.target_decoder = nn.Linear(d_model, params.n_targets)
+
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        initrange = 0.1
+        self.encoder.weight.data.uniform_(-initrange, initrange)
+        self.decoder.bias.data.zero_()
+        self.decoder.weight.data.uniform_(-initrange, initrange)
+
+    def forward(self, src: Tensor, src_mask: Tensor) -> Tensor:
+        """
+        Args:
+            src: Tensor, shape [seq_len, batch_size]
+            src_mask: Tensor, shape [seq_len, seq_len]
+
+        Returns:
+            output Tensor of shape [seq_len, batch_size, ntoken]
+        """
+        src = self.encoder(src) * math.sqrt(self.d_model)
+        src = self.pos_encoder(src)
+        output = self.transformer_encoder(src, src_mask)
+        actions_out = self.action_decoder(output)
+        targets_out = self.target_decoder(output)
+        return actions_out, targets_out
+
+
+def generate_square_subsequent_mask(sz: int) -> Tensor:
+    """Generates an upper-triangular matrix of -inf, with zeros on diag."""
+    return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
+
+
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        Args:
+            x: Tensor, shape [seq_len, batch_size, embedding_dim]
+        """
+        x = x + self.pe[:x.size(0)]
+        return self.dropout(x)

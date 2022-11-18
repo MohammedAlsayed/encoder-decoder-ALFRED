@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import wandb
 import json
 import itertools
+from nltk.stem.porter import *
 
 from utils import (
     get_device,
@@ -19,7 +20,8 @@ from utils import (
     build_output_tables,
     prefix_match,
     encode_data,
-    LCS
+    LCS,
+    load_glove_model
 )
 
 # zero reserved for padding
@@ -54,13 +56,34 @@ def setup_dataloader(args):
     print("sequence length = ", input_size)
     print("output length = ", output_size)
 
+    if args.glove:
+        not_found = 0
+        stemmer = PorterStemmer()
+        glove_model = load_glove_model("glove.6B.300d.txt")
+        embedding_matrix = np.zeros((len(v2id), args.embedding_dim))
+        np.random.seed(10)
+        for word in v2id.keys():
+            index = v2id[word]
+            if word in glove_model:
+                vector = glove_model[word]
+            elif word.lower() in glove_model:
+                vector = glove_model[word.lower()]
+            elif stemmer.stem(word) in glove_model:
+                vector = glove_model[stemmer.stem(word)]
+            else:
+                not_found += 1
+                vector = np.random.rand(args.embedding_dim)
+            embedding_matrix[index] = vector
+        args.pre_embeddings = embedding_matrix
+        print(f"total words found in Glove ={len(v2id)-not_found} out of {len(v2id)}!")
+
     # preparing train and valid data
     x_train, y_train, l_train, train_output_lengths = encode_data(data_json['train'], v2id, a2id, t2id, input_size, output_size)
     x_valid, y_valid, l_valid, valid_output_lengths = encode_data(data_json['valid_seen'], v2id, a2id, t2id, input_size, output_size)
 
     # args.train_input_length = train_input_length
 
-    train_dataset = TensorDataset(torch.from_numpy(x_train[0:2000]), torch.from_numpy(y_train[0:2000]), torch.from_numpy(l_train[0:2000]), torch.from_numpy(train_output_lengths[0:2000]))
+    train_dataset = TensorDataset(torch.from_numpy(x_train[0:3000]), torch.from_numpy(y_train[0:3000]), torch.from_numpy(l_train[0:3000]), torch.from_numpy(train_output_lengths[0:3000]))
     val_dataset = TensorDataset(torch.from_numpy(x_valid), torch.from_numpy(y_valid), torch.from_numpy(l_valid), torch.from_numpy(valid_output_lengths))
     
     train_loader = DataLoader(train_dataset, shuffle=True, batch_size=args.batch_size)
@@ -187,7 +210,7 @@ def train_epoch(
         for di in range(args.output_size):
 
             if args.attention:
-                decoder_output, decoder_hidden = attentionDecoder(decoder_action_input, decoder_target_input, decoder_hidden, encoder_output, length)
+                decoder_output, decoder_hidden = attentionDecoder(di, decoder_action_input, decoder_target_input, decoder_hidden, encoder_output)
             else:
                 decoder_output, decoder_hidden = decoder(decoder_action_input, decoder_target_input, decoder_hidden)            
             
@@ -376,16 +399,21 @@ if __name__ == "__main__":
         "--batch_size", type=int, default=1, help="size of each batch in loader"
     )
     parser.add_argument("--force_cpu", action="store_true", help="debug mode")
-    parser.add_argument("--attention", action="store_true", help="attention on decoder")
+    parser.add_argument("--attention", action="store_true", help="global attention on decoder")
+    parser.add_argument("--local_attention", action="store_true", help="local attention on decoder")
+    parser.add_argument("--glove", action="store_true", help="use glove word embedding")
     parser.add_argument("--eval", action="store_true", help="run eval")
-    parser.add_argument("--num_epochs", default=30, help="number of training epochs")
+    parser.add_argument("--num_epochs", default=16, help="number of training epochs")
     parser.add_argument(
         "--val_every", default=5, help="number of epochs between every eval loop"
     )
     parser.add_argument("--learning_rate", default=0.001, help="learning rate", type=float)
-    parser.add_argument("--embedding_dim", default=128, help="number of embedding dimensions", type=int)
+    parser.add_argument("--embedding_dim", default=300, help="number of embedding dimensions", type=int)
     parser.add_argument("--dropout", default=0.33, help="dropout rate of the neural net", type=float)
     parser.add_argument("--hidden_size", default=256, help="LSTM hidden dimension size", type=int)
 
     args = parser.parse_args()
+    
+    print(f"using attention: {args.attention}, local attention: {args.local_attention}, glove embeddings: {args.glove}")
+
     main(args)

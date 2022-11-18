@@ -183,3 +183,16 @@ def LCS(predicted, labels, o_length):
         total_score += score
     
     return score / predicted.shape[0]
+
+
+def load_glove_model(glove_path):
+    print("Loading Glove 300 Model")
+    glove_model = {}
+    with open(glove_path,'rb') as f:
+        for line in f:
+            split_line = line.split()
+            word = split_line[0].decode()
+            embedding = np.array(split_line[1:], dtype=np.float64)
+            glove_model[word] = embedding
+    print(f"{len(glove_model)} words loaded!")
+    return glove_model
